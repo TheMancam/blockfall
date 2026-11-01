@@ -545,7 +545,7 @@ function blockSprite(color, size, glowOn = true) {
   const x = c.getContext("2d");
   x.scale(DPR, DPR);
   const inset = Math.max(1, size * 0.06);
-  const bx = pad + inset, by = pad + inset, bs = size - inset * 2, r = size * 0.18;
+  const bx = pad + inset, by = pad + inset, bs = size - inset * 2, r = 0; // square blocks
 
   if (glowOn) {
     x.shadowColor = color;
@@ -1008,7 +1008,7 @@ function render(now) {
       const gx = (px + x) * CELL, gyy = (gy + y) * CELL;
       if (gy + y < 0) continue;
       ctx.fillStyle = "rgba(255,255,255,0.04)";
-      roundRect(ctx, gx + CELL * 0.1, gyy + CELL * 0.1, CELL * 0.8, CELL * 0.8, CELL * 0.15);
+      roundRect(ctx, gx + CELL * 0.08, gyy + CELL * 0.08, CELL * 0.84, CELL * 0.84, 0);
       ctx.fill();
       ctx.stroke();
     }
@@ -1048,7 +1048,7 @@ function render(now) {
       ctx.fillStyle = `rgba(255,255,255,${0.6 * (1 - k)})`;
       for (const [x, y] of lockFlash.cells) {
         if (y < 0) continue;
-        roundRect(ctx, x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2, CELL * 0.18);
+        roundRect(ctx, x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2, 0);
         ctx.fill();
       }
     }
@@ -1186,6 +1186,7 @@ let touchPieceId = -1;
 let gestureMode = null; // null | "HORIZONTAL" | "VERTICAL"
 let verticalStartY = 0, verticalStartTime = 0;
 let pointerHistory = [];
+let groundRefX = null; // finger x when a dragged-down piece touched the bottom
 
 function getCellWidth() { return Math.max(13, CELL); }
 
@@ -1208,6 +1209,7 @@ touchSurfaceEl.addEventListener("pointerdown", e => {
   verticalStartY = e.clientY;
   verticalStartTime = now;
   pointerHistory = [{ x: e.clientX, y: e.clientY, t: now }];
+  groundRefX = null;
   try { touchSurfaceEl.setPointerCapture(e.pointerId); } catch (err) {}
 });
 
@@ -1246,6 +1248,21 @@ touchSurfaceEl.addEventListener("pointermove", e => {
     if (recentDy > 12 && recentDy >= Math.abs(recentDx) * 0.9) {
       gestureMode = "VERTICAL";
       lastRefY = e.clientY; verticalStartY = recent.y; verticalStartTime = recent.t;
+    }
+  }
+
+  // Sideways stays locked while dragging down, but once the piece has landed
+  // a clear sideways slide switches the same drag into left/right movement.
+  if (gestureMode === "VERTICAL") {
+    if (isGrounded()) {
+      if (groundRefX === null) groundRefX = e.clientX;
+      const gdx = e.clientX - groundRefX;
+      if (Math.abs(gdx) >= cw * 0.6 && Math.abs(recentDx) > Math.abs(recentDy) * 1.2) {
+        gestureMode = "HORIZONTAL";
+        lastRefX = groundRefX;
+      }
+    } else {
+      groundRefX = null;
     }
   }
 
