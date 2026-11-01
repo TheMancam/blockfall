@@ -1,0 +1,61 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Prepare Android Project
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          mkdir -p www
+          cp index.html www/
+          if [ -f manifest.json ]; then cp manifest.json www/; fi
+          if [ -f icon.svg ]; then cp icon.svg www/; fi
+          if [ -f sw.js ]; then cp sw.js www/; fi
+          npm init -y
+          npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+          node -e 'require("fs").writeFileSync("capacitor.config.json", JSON.stringify({appId:"com.retro.blockfall",appName:"Blockfall",webDir:"www"}))'
+          npx cap add android
+          node -e 'const fs=require("fs"),p="android/app/src/main/AndroidManifest.xml";const s=fs.readFileSync(p,"utf8");if(!s.includes("screenOrientation"))fs.writeFileSync(p,s.replace("<activity","<activity android:screenOrientation=\"portrait\""));'
+          npx cap sync android
+
+      - name: Use fixed signing key (so new APKs update the old app)
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$DEBUG_KEYSTORE_B64" ]; then
+            echo "::error::DEBUG_KEYSTORE_B64 secret is missing. Add it in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          mkdir -p ~/.android
+          echo "$DEBUG_KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+
+      - name: Build Debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blockfall-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
