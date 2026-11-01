@@ -44,10 +44,10 @@
     height: 100dvh;
     display: flex;
     flex-direction: column;
-    padding-top: calc(env(safe-area-inset-top, 0px) + 28px);
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 54px);
-    padding-left: 6px;
-    padding-right: 6px;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 18px);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 26px);
+    padding-left: 2px;
+    padding-right: 2px;
     background:
       radial-gradient(ellipse 90% 55% at 50% 0%, rgba(120, 40, 220, 0.45) 0%, transparent 70%),
       radial-gradient(ellipse 80% 40% at 50% 100%, rgba(255, 50, 200, 0.22) 0%, transparent 70%),
@@ -126,11 +126,11 @@
     max-width: 500px;
     margin: 8px auto 0;
     display: flex;
-    gap: 5px;
+    gap: 3px;
     align-items: stretch;
   }
   .wing {
-    width: 50px;
+    width: 32px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -139,7 +139,7 @@
   #btn-pause {
     width: 100%;
     height: 40px;
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--panel);
     border: 1.5px solid var(--edge);
     display: flex;
@@ -160,14 +160,14 @@
   .box {
     background: var(--panel);
     border: 1.5px solid var(--edge);
-    border-radius: 12px;
+    border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 0 10px rgba(44, 246, 255, 0.12);
   }
   .box-title {
-    font-size: 9.5px;
+    font-size: 9px;
     font-weight: 800;
-    letter-spacing: 1.5px;
+    letter-spacing: 0.5px;
     text-align: center;
     padding: 5px 0 3px;
     color: #8fe9ff;
@@ -982,7 +982,7 @@ function fitBoard() {
   const wingW = holdBoxEl.clientWidth - 3;
   const mini = Math.max(7, Math.floor((wingW - 8) / 4.2));
   sizeMini(holdCv, wingW, mini * 2.6);
-  sizeMini(nextCv, wingW, mini * 3 * 3.1);
+  sizeMini(nextCv, wingW, mini * 5 * 2.9);   // room for 5 pieces
   spriteCache.clear();
   drawSideBoxes();
 }
@@ -1047,7 +1047,7 @@ function pullFromBag() {
   }
   return bag.pop();
 }
-function ensureQueue() { while (nextQueue.length < 4) nextQueue.push(pullFromBag()); }
+function ensureQueue() { while (nextQueue.length < 6) nextQueue.push(pullFromBag()); }
 
 function collides(shape, ox, oy) {
   for (const [x, y] of shape) {
@@ -1247,6 +1247,15 @@ function rotatePiece() {
   }
 }
 
+// A soft drop's sound waits a moment: if the drag turns into a hard-drop flick,
+// it's dropped so only the slam is heard.
+let softSfxTimer = null;
+function softSfx() {
+  if (softSfxTimer) return;
+  softSfxTimer = setTimeout(() => { softSfxTimer = null; sfx.soft(); }, 110);
+}
+function cancelSoftSfx() { clearTimeout(softSfxTimer); softSfxTimer = null; }
+
 function softDrop() {
   if (!canAct()) return false;
   if (!collides(SHAPES[curType][rot], px, py + 1)) {
@@ -1255,7 +1264,7 @@ function softDrop() {
     noteDescent();
     addScore(1);
     lastFall = performance.now();
-    sfx.soft();
+    softSfx();
     updateHud();
     return true;
   }
@@ -1269,6 +1278,7 @@ function hardDrop() {
   const dist = py - startY;
   if (dist > 0) lastMoveRotate = false;
   addScore(dist * 2);
+  cancelSoftSfx();
   vibe("heavy");
 
   // Slam effects: light trail per column, sparks at impact, board shake
@@ -1376,8 +1386,8 @@ function drawSideBoxes() {
 
   const nw = nextCv.width / DPR, nh = nextCv.height / DPR;
   if (showNext && nextQueue.length) {
-    const slot = nh / 3;
-    nextQueue.slice(0, 3).forEach((t, i) => drawMini(nextCtx, nextCv, t, nw / 2, slot * (i + 0.5), i === 0 ? mini : mini * 0.85));
+    const slot = nh / 5;
+    nextQueue.slice(0, 5).forEach((t, i) => drawMini(nextCtx, nextCv, t, nw / 2, slot * (i + 0.5), i === 0 ? mini : mini * 0.85));
   } else drawLabel(nextCtx, nw, nh, showNext ? "" : "OFF");
 }
 function drawLabel(ctx, w, h, text) {
@@ -1637,8 +1647,18 @@ let gestureMode = null; // null | "HORIZONTAL" | "VERTICAL"
 let verticalStartY = 0, verticalStartTime = 0;
 let pointerHistory = [];
 let groundRefX = null; // finger x when a dragged-down piece touched the bottom
+let softAcc = 0;        // soft-drop progress in rows (grows faster the faster you drag)
+let softRefX = 0;       // finger x reference for sideways moves during a soft drop
+// Drops go by finger speed (CSS px per ms), not by how far the thumb travels
+const HARD_VY = 1.0;          // a quick downward flick this fast slams the piece mid-swipe
+const HARD_MIN_DY = 18;       // ...as long as it moved at least this far in the last moment
+const HARD_RELEASE_VY = 0.6;  // a flick that ends with this speed on release also slams
+const SOFT_SIDE_MAX_VY = 0.6; // above this downward speed (a flick) sideways drift is ignored
 
-function getCellWidth() { return Math.max(13, CELL); }
+// Thumb travel per column: based on the phone's width, not the board's, so a bigger
+// board doesn't change how far you swipe (same feel as before: ~28px on a 412px phone).
+const SWIPE_CELL = 0.068;
+function getCellWidth() { return Math.max(13, Math.min(window.innerWidth, 520) * SWIPE_CELL); }
 
 const touchSurfaceEl = $("app");
 const NO_GESTURE = "button, #hold-box, #next-box";
@@ -1660,6 +1680,7 @@ touchSurfaceEl.addEventListener("pointerdown", e => {
   verticalStartTime = now;
   pointerHistory = [{ x: e.clientX, y: e.clientY, t: now }];
   groundRefX = null;
+  softAcc = 0;
   try { touchSurfaceEl.setPointerCapture(e.pointerId); } catch (err) {}
 });
 
@@ -1686,6 +1707,7 @@ touchSurfaceEl.addEventListener("pointermove", e => {
     if (dist < 10) return;
     if (totalDy > 0 && totalDy >= Math.abs(totalDx) * 0.85) {
       gestureMode = "VERTICAL";
+      softRefX = e.clientX;
       lastRefY = tStartY; verticalStartY = tStartY; verticalStartTime = tStartTime;
     } else if (Math.abs(totalDx) > Math.abs(totalDy) * 1.15) {
       gestureMode = "HORIZONTAL";
@@ -1697,22 +1719,8 @@ touchSurfaceEl.addEventListener("pointermove", e => {
     if (stepDy > 0 && stepDy >= Math.abs(stepDx) * 0.75) lastRefX += stepDx;
     if (recentDy > 12 && recentDy >= Math.abs(recentDx) * 0.9) {
       gestureMode = "VERTICAL";
+      softRefX = e.clientX;
       lastRefY = e.clientY; verticalStartY = recent.y; verticalStartTime = recent.t;
-    }
-  }
-
-  // Sideways stays locked while dragging down, but once the piece has landed
-  // a clear sideways slide switches the same drag into left/right movement.
-  if (gestureMode === "VERTICAL") {
-    if (isGrounded()) {
-      if (groundRefX === null) groundRefX = e.clientX;
-      const gdx = e.clientX - groundRefX;
-      if (Math.abs(gdx) >= cw * 0.6 && Math.abs(recentDx) > Math.abs(recentDy) * 1.2) {
-        gestureMode = "HORIZONTAL";
-        lastRefX = groundRefX;
-      }
-    } else {
-      groundRefX = null;
     }
   }
 
@@ -1725,12 +1733,33 @@ touchSurfaceEl.addEventListener("pointermove", e => {
       lastRefX += steps * cw;
     }
   } else if (gestureMode === "VERTICAL") {
-    const dy = e.clientY - lastRefY;
-    if (dy >= cw * 1.1 && recentVy < 0.8) {
-      const steps = Math.trunc(dy / (cw * 1.1));
+    // fast downward flick: slam right away, no need to finish the swipe
+    if (recentVy >= HARD_VY && recentDy >= HARD_MIN_DY) {
+      hardDrop();
+      touchPieceId = -1;
+      gestureMode = null;
+      return;
+    }
+    // left/right still works while soft dropping (but a flick's sideways drift is ignored)
+    if (recentVy < SOFT_SIDE_MAX_VY) {
+      const sdx = e.clientX - softRefX;
+      if (Math.abs(sdx) >= cw) {
+        const steps = Math.trunc(sdx / cw);
+        for (let i = 0; i < Math.abs(steps); i++) moveHoriz(Math.sign(steps));
+        softRefX += steps * cw;
+      }
+    } else {
+      softRefX = e.clientX;
+    }
+    // slower drag: soft drop, more rows per pixel the faster the thumb moves
+    if (stepDy > 0) {
+      softAcc += (stepDy / (cw * 0.75)) * (1 + 2.5 * Math.max(0, recentVy));
+      const steps = Math.floor(softAcc);
       for (let i = 0; i < steps; i++) { if (touchPieceId !== pieceId) break; softDrop(); }
-      lastRefY += steps * (cw * 1.1);
-    } else if (dy < 0) lastRefY = e.clientY;
+      softAcc -= steps;
+    } else if (stepDy < 0) {
+      softAcc = 0;
+    }
   }
 });
 
@@ -1741,10 +1770,14 @@ function finishGesture(e) {
   const totalDt = Math.max(1, now - tStartTime);
   const totalDist = Math.hypot(e.clientX - tStartX, e.clientY - tStartY);
   if (gestureMode === null && totalDist < 12 && totalDt < 280) rotatePiece();
-  else if (gestureMode === "VERTICAL") {
-    const vDt = Math.max(1, now - verticalStartTime);
-    const vDy = e.clientY - verticalStartY;
-    if (vDy > 34 && vDy / vDt >= 0.72) hardDrop();
+  else if (gestureMode === "VERTICAL" || gestureMode === null) {
+    // speed of the last moment before letting go
+    pointerHistory.push({ x: e.clientX, y: e.clientY, t: now });
+    while (pointerHistory.length > 1 && now - pointerHistory[0].t > 75) pointerHistory.shift();
+    const r0 = pointerHistory[0];
+    const rDy = e.clientY - r0.y, rDx = e.clientX - r0.x;
+    const rVy = rDy / Math.max(1, now - r0.t);
+    if (rVy >= HARD_RELEASE_VY && rDy >= 12 && rDy >= Math.abs(rDx) * 0.85) hardDrop();
   }
   touchPieceId = -1;
   gestureMode = null;
